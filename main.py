@@ -9,6 +9,7 @@ import sched
 import time
 import traceback
 import dateparser
+import ctypes
 from typing import Tuple
 
 try:
@@ -1260,6 +1261,8 @@ def setup_ui():
 
 if __name__ == "__main__":
     try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+
         dpg.create_context()
         setup_ui()
 
@@ -1268,7 +1271,8 @@ if __name__ == "__main__":
         large_icon_path = os.path.join(script_dir, 'assets', '256.ico')
 
 
-        dpg.create_viewport(title="C2", width=1400, height=600, small_icon=small_icon_path, large_icon=large_icon_path)
+        dpg.create_viewport(title="C2", width=1600, height=800, small_icon=small_icon_path, large_icon=large_icon_path)
+        dpg.configure_viewport(0, dpi_aware=True)
 
         # --- Theming
         dark_theme = create_theme_imgui_dark()
@@ -1278,7 +1282,7 @@ if __name__ == "__main__":
         dpg.setup_dearpygui()
 
         dpg.set_viewport_resizable(True)
-        dpg.maximize_viewport()
+        #dpg.maximize_viewport()
 
         dpg.show_viewport()
         dpg.start_dearpygui()
