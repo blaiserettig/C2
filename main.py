@@ -970,7 +970,7 @@ def setup_ui():
         logger.terminal_window = dpg.last_item()
 
     # Main Application Window
-    with dpg.window(tag="main_window", label="CURA", width=1400, height=600):
+    with dpg.window(tag="main_window", label="C2", width=1400, height=600):
         # Menu Bar
         with dpg.menu_bar():
             with dpg.menu(label="File"):
@@ -1263,7 +1263,12 @@ if __name__ == "__main__":
         dpg.create_context()
         setup_ui()
 
-        dpg.create_viewport(title="CURA", width=1400, height=600)
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        small_icon_path = os.path.join(script_dir, 'assets', '64.ico')
+        large_icon_path = os.path.join(script_dir, 'assets', '256.ico')
+
+
+        dpg.create_viewport(title="C2", width=1400, height=600, small_icon=small_icon_path, large_icon=large_icon_path)
 
         # --- Theming
         dark_theme = create_theme_imgui_dark()
