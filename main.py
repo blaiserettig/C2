@@ -33,7 +33,7 @@ dpg.create_context()
 # --- GLOBAL VARIABLES
 scheduled_event = None
 is_scheduled = False
-has_auth_failed = False
+is_auth_complete = False
 credentials = ["", ""]
 progress_index = 0
 s = sched.scheduler(time.time, time.sleep)
@@ -158,6 +158,7 @@ def on_cancel_or_execute(string):
     global is_scheduled
 
     is_scheduled = False
+    is_auth_complete = True
 
     # Reset UI elements
     dpg.configure_item("date_schedule", enabled=True)
@@ -456,9 +457,7 @@ def execute(cred: list):
 
 def auth():
     """Open authentication dialog for email/password input"""
-    global credentials, has_auth_failed
-
-    has_auth_failed = False
+    global credentials, is_auth_complete
 
     dpg.configure_item("auth_dialog", show=True)
 
@@ -466,12 +465,15 @@ def auth():
 
 
 def attempt_login(email, password):
+    global is_auth_complete
     """Try to log in with the given credentials"""
     if not selenium_available:
         return False
 
     try:
         global logger
+
+        is_auth_complete = False
 
         options = Options()
         options.add_argument("--headless")
@@ -583,27 +585,28 @@ def validate_email(email: str):
 
 def show_progress():
     """Show progress indicator during authentication"""
-    global progress_index, has_auth_failed
+    global progress_index, is_auth_complete, logger
 
-    dots = [".", "..", "...", ""]
-    dpg.configure_item(
-        "auth_progress",
-        default_value=f"Attempting Authentication with Roompact{dots[progress_index]}",
-    )
-
-    if not has_auth_failed:
+    if (not is_auth_complete):
+        dots = [".", "..", "...", ""]
+        dpg.configure_item(
+            "auth_progress",
+            default_value=f"Attempting Authentication with Roompact{dots[progress_index]}",
+        )
         progress_index = (progress_index + 1) % len(dots)
         # Schedule the next update in 500ms
         dpg.set_frame_callback(
             dpg.get_frame_count() + 30, show_progress
         )  # 30 frames ~ 500ms at 60 FPS
+    else:
+        dpg.configure_item("auth_progress", default_value="")
 
 
 def submit_credentials():
     """Handle credential submission in auth dialog"""
-    global credentials, has_auth_failed, progress_index
+    global credentials, is_auth_complete, progress_index, logger
 
-    has_auth_failed = False
+    is_auth_complete = False
     email = dpg.get_value("email_input").strip()
     password = dpg.get_value("password_input").strip()
 
@@ -630,13 +633,15 @@ def submit_credentials():
 
     # Login attempt in a separate thread
     def login_task():
-        global has_auth_failed, credentials
+        global is_auth_complete, credentials
 
         if attempt_login(email, password):  # authenticated, credentials are valid
             credentials[0] = email
             credentials[1] = password
             dpg.configure_item("auth_dialog", show=False)
+            time.sleep(0.1)
 
+            is_auth_complete = True
             complete_scheduling()
         else:
             dpg.configure_item("modal_title", default_value="Authentication Failed")
@@ -644,7 +649,7 @@ def submit_credentials():
                 "modal_message", default_value="Invalid email or password."
             )
             dpg.configure_item("modal_dialog", show=True)
-            has_auth_failed = True
+            is_auth_complete = True
             dpg.configure_item("auth_progress", default_value="")
 
     threading.Thread(target=login_task, daemon=True).start()
@@ -712,7 +717,7 @@ def complete_scheduling():
 
 def on_schedule_button():
     """Handle schedule button click"""
-    global scheduled_event, is_scheduled
+    global scheduled_event, is_scheduled, logger
 
     if combobox_mismatch():
         dpg.configure_item("modal_title", default_value="Error")
@@ -1257,6 +1262,8 @@ def setup_ui():
     dpg.set_viewport_resize_callback(update_layout)
 
     dpg.set_primary_window("main_window", True)
+
+    dev_mode_warn()
 
 
 if __name__ == "__main__":
