@@ -34,6 +34,8 @@ dpg.create_context()
 scheduled_event = None
 is_scheduled = False
 is_auth_complete = False
+has_auth_failed = False
+is_invalid_email = False
 credentials = ["", ""]
 progress_index = 0
 s = sched.scheduler(time.time, time.sleep)
@@ -604,7 +606,7 @@ def show_progress():
 
 def submit_credentials():
     """Handle credential submission in auth dialog"""
-    global credentials, is_auth_complete, progress_index, logger
+    global credentials, is_auth_complete, progress_index, logger, is_invalid_email
 
     is_auth_complete = False
     email = dpg.get_value("email_input").strip()
@@ -612,6 +614,11 @@ def submit_credentials():
 
     # Validate email format
     if not validate_email(email):
+
+        is_invalid_email = True
+        dpg.configure_item("auth_dialog", show=False)
+        time.sleep(0.5)
+
         dpg.configure_item("modal_title", default_value="Invalid Email")
         dpg.configure_item(
             "modal_message",
@@ -633,7 +640,7 @@ def submit_credentials():
 
     # Login attempt in a separate thread
     def login_task():
-        global is_auth_complete, credentials
+        global is_auth_complete, credentials, has_auth_failed
 
         if attempt_login(email, password):  # authenticated, credentials are valid
             credentials[0] = email
@@ -644,6 +651,10 @@ def submit_credentials():
             is_auth_complete = True
             complete_scheduling()
         else:
+            has_auth_failed = True
+            dpg.configure_item("auth_dialog", show=False)
+            time.sleep(0.5)
+
             dpg.configure_item("modal_title", default_value="Authentication Failed")
             dpg.configure_item(
                 "modal_message", default_value="Invalid email or password."
@@ -848,6 +859,15 @@ def confirm_quit():
     dpg.stop_dearpygui()
 
 
+def modal_callback():
+    global is_invalid_email, has_auth_failed
+    dpg.configure_item("modal_dialog", show=False)
+    if (is_invalid_email or has_auth_failed):
+        time.sleep(0.5)
+        dpg.configure_item("auth_dialog", show=True)
+        is_invalid_email = False
+
+
 def setup_ui():
     """Create the UI layout and widgets"""
 
@@ -900,8 +920,8 @@ def setup_ui():
         dpg.add_button(
             label="OK",
             width=75,
-            callback=lambda: dpg.configure_item("modal_dialog", show=False),
-        )
+            callback=modal_callback),
+
 
     # Authentication dialog
     with dpg.window(
@@ -1186,7 +1206,7 @@ def setup_ui():
                         dpg.add_combo(
                             items=list(range(1, 13)),
                             tag="schedule_hour",
-                            default_value=10,
+                            default_value=8,
                             width=50,
                         )
                         dpg.add_text(":")
@@ -1199,7 +1219,7 @@ def setup_ui():
                         dpg.add_combo(
                             items=["am", "pm"],
                             tag="schedule_period",
-                            default_value="pm",
+                            default_value="am",
                             width=50,
                         )
 
