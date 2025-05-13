@@ -10,6 +10,7 @@ import time
 import traceback
 import dateparser
 import ctypes
+import keyring
 from typing import Tuple
 
 try:
@@ -180,25 +181,14 @@ def on_cancel_or_execute(string):
         dpg.configure_item("modal_dialog", show=True)
 
 
-def execute(cred: list):
-    """Execute the form submission using Selenium"""
-    global logger
-
-    if not selenium_available:
-        dpg.configure_item("modal_title", default_value="Error")
-        dpg.configure_item(
-            "modal_message",
-            default_value="Selenium is not available. Please install required packages.",
-        )
-        dpg.configure_item("modal_dialog", show=True)
-        return
-
-    email = str(cred[0]).strip()
-    password = str(cred[1]).strip()
+def get_chromedriver(headless=False):
+    options = Options()
+    if headless:
+        options.add_argument("--headless")
+    else:
+        options.add_argument("--start-maximized")
 
     try:
-        options = Options()
-        options.add_argument("--start-maximized")
 
         base_path = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
         chromedriver_path = os.path.join(
@@ -221,233 +211,8 @@ def execute(cred: list):
         logger.write(f"{datetime.now()}: Using chromedriver at: {chromedriver_path}\n")
 
         service = Service(ChromeDriverManager().install())
-        driver = webdriver.Chrome(service=service, options=options)
 
-        driver.get("https://roompact.com/login")
-
-        def throw_modal_error(err: TimeoutException):
-            dpg.configure_item("modal_title", default_value="Execution Error")
-            dpg.configure_item(
-                "modal_message",
-                default_value=f"Script could not execute: {type(err).__name__} – {err}",
-            )
-            dpg.configure_item("modal_dialog", show=True)
-            driver.quit()
-            return
-
-        try:  # Wait until we arrive at the Roompact login page
-            WebDriverWait(driver, 5).until(
-                EC.presence_of_element_located((By.ID, "login-input"))
-            )
-        except TimeoutException as err:
-            throw_modal_error(err)
-
-        # Continue with login process
-        rp_input_email = driver.find_element(By.ID, "login-input")
-        rp_input_email.send_keys(email)
-        rp_input_email.send_keys(Keys.RETURN)
-
-        try:  # See if we are at the Microsoft SSO page
-            WebDriverWait(driver, 5).until(
-                EC.presence_of_element_located((By.ID, "i0116"))
-            )
-        except TimeoutException:
-            try:  # If not, see if we are still on Roompact being prompted for the password
-                WebDriverWait(driver, 5).until(
-                    EC.presence_of_element_located((By.ID, "password-input"))
-                )
-
-                rp_input_password = driver.find_element(By.ID, "password-input")
-                rp_input_password.send_keys(password)
-                rp_input_password.send_keys(Keys.RETURN)
-
-                try:  # If that succeeds, wait once again to be redirected to Microsoft SSO
-                    WebDriverWait(driver, 5).until(
-                        EC.presence_of_element_located((By.ID, "i0116"))
-                    )
-                except TimeoutException as err:
-                    throw_modal_error(err)
-            except TimeoutException as err:
-                throw_modal_error(err)
-
-        msft_input_email = driver.find_element(By.ID, "i0116")
-        msft_input_email.send_keys(email)
-        msft_input_email.send_keys(Keys.RETURN)
-
-        time.sleep(1)
-
-        try:
-            WebDriverWait(driver, 5).until(
-                EC.presence_of_element_located((By.ID, "i0118"))
-            )
-        except TimeoutException as err:
-            throw_modal_error(err)
-
-        msft_input_password = driver.find_element(By.ID, "i0118")
-        msft_input_password.send_keys(password)
-        msft_input_password.send_keys(Keys.RETURN)
-
-        try:
-            WebDriverWait(driver, 5).until(
-                EC.presence_of_element_located((By.ID, "idSIButton9"))
-            )
-        except TimeoutException as err:
-            throw_modal_error(err)
-
-        time.sleep(1)
-
-        msft_ssi = driver.find_element(By.ID, "idSIButton9")
-        msft_ssi.send_keys(Keys.RETURN)
-
-        try:
-            WebDriverWait(driver, 5).until(
-                EC.presence_of_element_located((By.ID, "main_search_bar"))
-            )
-        except TimeoutException as err:
-            throw_modal_error(err)
-
-        driver.get("https://roompact.com/forms/#/form/7r3gX9")
-
-        try:
-            WebDriverWait(driver, 5).until(
-                EC.presence_of_element_located((By.CLASS_NAME, "elm-datepicker--input"))
-            )
-        except TimeoutException as err:
-            throw_modal_error(err)
-
-        general_date = dpg_to_reg_time(dpg.get_value("picker_date_general"))
-        year, month, day = general_date.split("-")
-        name = dpg.get_value("name_entry")
-        building = dpg.get_value("building_combo")
-
-        date_field = driver.find_element(By.CLASS_NAME, "elm-datepicker--input")
-        date_field.send_keys(f"{month}/{day}/{year}")
-
-        who = driver.find_element(
-            By.CSS_SELECTOR,
-            "input[aria-label='Enter text for Which RAs were on duty?']",
-        )
-        who.send_keys(name)
-
-        input_hall = driver.find_element(
-            By.CSS_SELECTOR, "input[aria-label='Tag Buildings']"
-        )
-        input_hall.send_keys(building)
-
-        # Wait for the dropdown to appear
-        try:
-            WebDriverWait(driver, 5).until(
-                EC.presence_of_element_located(
-                    (By.CLASS_NAME, "forms-subscriptions-search-result-row")
-                )
-            )
-        except TimeoutException as err:
-            throw_modal_error(err)
-
-        # Find the dropdown option and click it
-        select_hall = driver.find_element(
-            By.CLASS_NAME, "forms-subscriptions-search-result-row"
-        )
-        time.sleep(1)
-        select_hall.click()
-
-        # Walk 1
-        w1_time = driver.find_element(
-            By.CSS_SELECTOR,
-            "input[aria-label='Enter time for Time of First Community Walk']",
-        )
-        hour1 = dpg.get_value("walk1_hour")
-        minute1 = dpg.get_value("walk1_minute")
-        period1 = dpg.get_value("walk1_period")
-        w1_time.send_keys(format_time((hour1, minute1, period1)))
-
-        w1_event = driver.find_element(By.ID, "desc_resp_sub_Zdl2oy")
-        w1_event.send_keys(dpg.get_value("walk1_text"))
-
-        # Walk 2
-        w2_time = driver.find_element(
-            By.CSS_SELECTOR,
-            "input[aria-label='Enter time for Time of Second Community Walk']",
-        )
-        hour2 = dpg.get_value("walk2_hour")
-        minute2 = dpg.get_value("walk2_minute")
-        period2 = dpg.get_value("walk2_period")
-        w2_time.send_keys(format_time((hour2, minute2, period2)))
-
-        w2_event = driver.find_element(
-            By.CSS_SELECTOR,
-            "input[aria-label='Enter text for Events of Second Community Walk']",
-        )
-        w2_event.send_keys(dpg.get_value("walk2_text"))
-
-        # Walk 3 (weekend)
-        w3_time = driver.find_element(
-            By.CSS_SELECTOR,
-            "input[aria-label='Enter time for Time of Third Community Walk (weekends only)']",
-        )
-        # is_weekend = dpg.get_value("weekend_checkbox")
-
-        # if is_weekend:
-        hour3 = dpg.get_value("walk3_hour")
-        minute3 = dpg.get_value("walk3_minute")
-        period3 = dpg.get_value("walk3_period")
-        w3_time.send_keys(format_time((hour3, minute3, period3)))
-
-        w3_event = driver.find_element(
-            By.CSS_SELECTOR,
-            "input[aria-label='Enter text for Events of Third Community Walk (weekends only)']",
-        )
-        # if is_weekend:
-        w3_event.send_keys(dpg.get_value("walk3_text"))
-
-        # Details
-        call = driver.find_element(By.ID, "desc_resp_sub_N1dlMj")
-        call.send_keys(dpg.get_value("calls_text"))
-
-        inter = driver.find_element(By.ID, "desc_resp_sub_Zdl2o4")
-        inter.send_keys(dpg.get_value("interactions_text"))
-
-        loc = driver.find_element(
-            By.CSS_SELECTOR,
-            "input[aria-label='Enter text for Where did you see residents hanging out in the community?']",
-        )
-        loc.send_keys(dpg.get_value("areas_text"))
-
-        incident = driver.find_element(By.ID, "desc_resp_sub_RovZrr")
-        incident.send_keys(dpg.get_value("incidents_text"))
-
-        wr = driver.find_element(By.ID, "desc_resp_sub_Vrmag2")
-        wr.send_keys(dpg.get_value("workrequests_text"))
-
-        add = driver.find_element(By.ID, "desc_resp_sub_aljG2k")
-        add.send_keys(dpg.get_value("notes_text"))
-        add.send_keys("\nC2 Automated Submission")
-
-        time.sleep(2)
-
-        try:
-            submit = driver.find_element(
-                By.XPATH, '//button[normalize-space()="Submit"]'
-            )
-            time.sleep(1)
-            if dpg.get_value("dev_mode"):
-                logger.write(
-                    f"{datetime.now()}: Submission aborted due to Developer Mode\n"
-                )
-            else:
-                submit.click()
-                logger.write(f"{datetime.now()}: Successful Submission\n")
-                time.sleep(5)
-        except TimeoutException as err:
-            throw_modal_error(err)
-
-        driver.quit()
-        on_cancel_or_execute("execute")
-
-        del email
-        del password
-
-        return
+        return webdriver.Chrome(service=service, options=options)
 
     except Exception as e:
         logger.write(f"Error in execute: {str(e)}\n")
@@ -455,6 +220,262 @@ def execute(cred: list):
         dpg.configure_item("modal_message", default_value=f"Error: {str(e)}")
         dpg.configure_item("modal_dialog", show=True)
         return
+
+
+def throw_modal_error(err: TimeoutException, driver):
+    dpg.configure_item("modal_title", default_value="Execution Error")
+    dpg.configure_item(
+        "modal_message",
+        default_value=f"Script could not execute: {type(err).__name__} – {err}",
+    )
+    dpg.configure_item("modal_dialog", show=True)
+    driver.quit()
+    return False
+
+
+def login_flow(driver, email, password):
+
+
+    try:  # Wait until we arrive at the Roompact login page
+        WebDriverWait(driver, 5).until(
+            EC.presence_of_element_located((By.ID, "login-input"))
+        )
+    except TimeoutException as err:
+        throw_modal_error(err, driver)
+
+    # Continue with login process
+    rp_input_email = driver.find_element(By.ID, "login-input")
+    rp_input_email.send_keys(email)
+    rp_input_email.send_keys(Keys.RETURN)
+
+    try:  # See if we are at the Microsoft SSO page
+        WebDriverWait(driver, 5).until(
+            EC.presence_of_element_located((By.ID, "i0116"))
+        )
+    except TimeoutException:
+        try:  # If not, see if we are still on Roompact being prompted for the password
+            WebDriverWait(driver, 5).until(
+                EC.presence_of_element_located((By.ID, "password-input"))
+            )
+
+            rp_input_password = driver.find_element(By.ID, "password-input")
+            rp_input_password.send_keys(password)
+            rp_input_password.send_keys(Keys.RETURN)
+
+            try:  # If that succeeds, wait once again to be redirected to Microsoft SSO
+                WebDriverWait(driver, 5).until(
+                    EC.presence_of_element_located((By.ID, "i0116"))
+                )
+            except TimeoutException as err:
+                throw_modal_error(err, driver)
+        except TimeoutException as err:
+            throw_modal_error(err, driver)
+
+    msft_input_email = driver.find_element(By.ID, "i0116")
+    msft_input_email.send_keys(email)
+    msft_input_email.send_keys(Keys.RETURN)
+
+    time.sleep(1)
+
+    try:
+        WebDriverWait(driver, 5).until(
+            EC.presence_of_element_located((By.ID, "i0118"))
+        )
+    except TimeoutException as err:
+        throw_modal_error(err, driver)
+
+    msft_input_password = driver.find_element(By.ID, "i0118")
+    msft_input_password.send_keys(password)
+    msft_input_password.send_keys(Keys.RETURN)
+
+    try:
+        WebDriverWait(driver, 5).until(
+            EC.presence_of_element_located((By.ID, "idSIButton9"))
+        )
+    except TimeoutException as err:
+        throw_modal_error(err, driver)
+
+    time.sleep(1)
+
+    msft_ssi = driver.find_element(By.ID, "idSIButton9")
+    msft_ssi.send_keys(Keys.RETURN)
+
+    try:
+        WebDriverWait(driver, 5).until(
+            EC.presence_of_element_located((By.ID, "main_search_bar"))
+        )
+        return True
+    except TimeoutException as err:
+        throw_modal_error(err, driver)
+
+
+def execute(cred: list):
+    """Execute the form submission using Selenium"""
+    global logger
+
+    if not selenium_available:
+        dpg.configure_item("modal_title", default_value="Error")
+        dpg.configure_item(
+            "modal_message",
+            default_value="Selenium is not available. Please install required packages.",
+        )
+        dpg.configure_item("modal_dialog", show=True)
+        return
+
+    email = str(cred[0]).strip()
+    password = str(cred[1]).strip()
+
+    driver = get_chromedriver()
+
+    driver.get("https://roompact.com/login")
+
+    if (not login_flow(driver, email, password)):
+        return
+
+    driver.get("https://roompact.com/forms/#/form/7r3gX9")
+
+    try:
+        WebDriverWait(driver, 5).until(
+            EC.presence_of_element_located((By.CLASS_NAME, "elm-datepicker--input"))
+        )
+    except TimeoutException as err:
+        throw_modal_error(err, driver)
+
+    general_date = dpg_to_reg_time(dpg.get_value("picker_date_general"))
+    year, month, day = general_date.split("-")
+    name = dpg.get_value("name_entry")
+    building = dpg.get_value("building_combo")
+
+    date_field = driver.find_element(By.CLASS_NAME, "elm-datepicker--input")
+    date_field.send_keys(f"{month}/{day}/{year}")
+
+    who = driver.find_element(
+        By.CSS_SELECTOR,
+        "input[aria-label='Enter text for Which RAs were on duty?']",
+    )
+    who.send_keys(name)
+
+    input_hall = driver.find_element(
+        By.CSS_SELECTOR, "input[aria-label='Tag Buildings']"
+    )
+    input_hall.send_keys(building)
+
+    # Wait for the dropdown to appear
+    try:
+        WebDriverWait(driver, 5).until(
+            EC.presence_of_element_located(
+                (By.CLASS_NAME, "forms-subscriptions-search-result-row")
+            )
+        )
+    except TimeoutException as err:
+        throw_modal_error(err, driver)
+
+    # Find the dropdown option and click it
+    select_hall = driver.find_element(
+        By.CLASS_NAME, "forms-subscriptions-search-result-row"
+    )
+    time.sleep(1)
+    select_hall.click()
+
+    # Walk 1
+    w1_time = driver.find_element(
+        By.CSS_SELECTOR,
+        "input[aria-label='Enter time for Time of First Community Walk']",
+    )
+    hour1 = dpg.get_value("walk1_hour")
+    minute1 = dpg.get_value("walk1_minute")
+    period1 = dpg.get_value("walk1_period")
+    w1_time.send_keys(format_time((hour1, minute1, period1)))
+
+    w1_event = driver.find_element(By.ID, "desc_resp_sub_Zdl2oy")
+    w1_event.send_keys(dpg.get_value("walk1_text"))
+
+    # Walk 2
+    w2_time = driver.find_element(
+        By.CSS_SELECTOR,
+        "input[aria-label='Enter time for Time of Second Community Walk']",
+    )
+    hour2 = dpg.get_value("walk2_hour")
+    minute2 = dpg.get_value("walk2_minute")
+    period2 = dpg.get_value("walk2_period")
+    w2_time.send_keys(format_time((hour2, minute2, period2)))
+
+    w2_event = driver.find_element(
+        By.CSS_SELECTOR,
+        "input[aria-label='Enter text for Events of Second Community Walk']",
+    )
+    w2_event.send_keys(dpg.get_value("walk2_text"))
+
+    # Walk 3 (weekend)
+    w3_time = driver.find_element(
+        By.CSS_SELECTOR,
+        "input[aria-label='Enter time for Time of Third Community Walk (weekends only)']",
+    )
+    # is_weekend = dpg.get_value("weekend_checkbox")
+
+    # if is_weekend:
+    hour3 = dpg.get_value("walk3_hour")
+    minute3 = dpg.get_value("walk3_minute")
+    period3 = dpg.get_value("walk3_period")
+    w3_time.send_keys(format_time((hour3, minute3, period3)))
+
+    w3_event = driver.find_element(
+        By.CSS_SELECTOR,
+        "input[aria-label='Enter text for Events of Third Community Walk (weekends only)']",
+    )
+    # if is_weekend:
+    w3_event.send_keys(dpg.get_value("walk3_text"))
+
+    # Details
+    call = driver.find_element(By.ID, "desc_resp_sub_N1dlMj")
+    call.send_keys(dpg.get_value("calls_text"))
+
+    inter = driver.find_element(By.ID, "desc_resp_sub_Zdl2o4")
+    inter.send_keys(dpg.get_value("interactions_text"))
+
+    loc = driver.find_element(
+        By.CSS_SELECTOR,
+        "input[aria-label='Enter text for Where did you see residents hanging out in the community?']",
+    )
+    loc.send_keys(dpg.get_value("areas_text"))
+
+    incident = driver.find_element(By.ID, "desc_resp_sub_RovZrr")
+    incident.send_keys(dpg.get_value("incidents_text"))
+
+    wr = driver.find_element(By.ID, "desc_resp_sub_Vrmag2")
+    wr.send_keys(dpg.get_value("workrequests_text"))
+
+    add = driver.find_element(By.ID, "desc_resp_sub_aljG2k")
+    add.send_keys(dpg.get_value("notes_text"))
+    add.send_keys("\nC2 Automated Submission")
+
+    time.sleep(2)
+
+    try:
+        submit = driver.find_element(
+            By.XPATH, '//button[normalize-space()="Submit"]'
+        )
+        time.sleep(1)
+        if dpg.get_value("dev_mode"):
+            logger.write(
+                f"{datetime.now()}: Submission aborted due to Developer Mode\n"
+            )
+        else:
+            submit.click()
+            logger.write(f"{datetime.now()}: Successful Submission\n")
+            time.sleep(5)
+    except TimeoutException as err:
+        throw_modal_error(err, driver)
+
+    driver.quit()
+    on_cancel_or_execute("execute")
+
+    email = None
+    password = None
+    del email
+    del password
+
+    return
 
 
 def auth():
@@ -472,112 +493,15 @@ def attempt_login(email, password):
     if not selenium_available:
         return False
 
-    try:
-        global logger
+    global logger
 
-        is_auth_complete = False
+    is_auth_complete = False
 
-        options = Options()
-        options.add_argument("--headless")
+    driver = get_chromedriver(True)
 
-        base_path = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
-        chromedriver_path = os.path.join(
-            base_path, "wdm", "chromedriver", "chromedriver.exe"
-        )
+    driver.get("https://roompact.com/login")
 
-        if not os.path.exists(chromedriver_path):
-            # Download chromedriver dynamically if not bundled
-            chromedriver_path = ChromeDriverManager().install()
-
-        logger.write(f"{datetime.now()}: Using chromedriver at: {chromedriver_path}\n")
-
-        service = Service(ChromeDriverManager().install())
-        driver = webdriver.Chrome(service=service, options=options)
-
-        driver.get("https://roompact.com/login")
-
-        # Login process
-        try:  # Wait until we arrive at the Roompact login page
-            WebDriverWait(driver, 5).until(
-                EC.presence_of_element_located((By.ID, "login-input"))
-            )
-        except TimeoutException:
-            driver.quit()
-            return False
-
-        rp_input_email = driver.find_element(By.ID, "login-input")
-        rp_input_email.send_keys(email)
-        rp_input_email.send_keys(Keys.RETURN)
-
-        try:  # See if we are at the Microsoft SSO page
-            WebDriverWait(driver, 5).until(
-                EC.presence_of_element_located((By.ID, "i0116"))
-            )
-        except TimeoutException:
-            try:  # If not, see if we are still on Roompact being prompted for the password
-                WebDriverWait(driver, 5).until(
-                    EC.presence_of_element_located((By.ID, "password-input"))
-                )
-
-                rp_input_password = driver.find_element(By.ID, "password-input")
-                rp_input_password.send_keys(password)
-                rp_input_password.send_keys(Keys.RETURN)
-
-                try:  # If that succeeds, wait once again to be redirected to Microsoft SSO
-                    WebDriverWait(driver, 5).until(
-                        EC.presence_of_element_located((By.ID, "i0116"))
-                    )
-                except TimeoutException:
-                    driver.quit()
-                    return False
-            except TimeoutException:
-                driver.quit()
-                return False
-
-        msft_input_email = driver.find_element(By.ID, "i0116")
-        msft_input_email.send_keys(email)
-        msft_input_email.send_keys(Keys.RETURN)
-
-        time.sleep(1)
-
-        try:
-            WebDriverWait(driver, 5).until(
-                EC.presence_of_element_located((By.ID, "i0118"))
-            )
-        except TimeoutException:
-            driver.quit()
-            return False
-
-        msft_input_password = driver.find_element(By.ID, "i0118")
-        msft_input_password.send_keys(password)
-        msft_input_password.send_keys(Keys.RETURN)
-
-        try:
-            WebDriverWait(driver, 5).until(
-                EC.presence_of_element_located((By.ID, "idSIButton9"))
-            )
-        except TimeoutException:
-            driver.quit()
-            return False
-
-        time.sleep(1)
-
-        msft_ssi = driver.find_element(By.ID, "idSIButton9")
-        msft_ssi.send_keys(Keys.RETURN)
-
-        try:
-            WebDriverWait(driver, 5).until(
-                EC.presence_of_element_located((By.ID, "main_search_bar"))
-            )
-            driver.quit()
-            return True
-        except TimeoutException:
-            driver.quit()
-            return False
-
-    except Exception as e:
-        logger.write(f"Login error: {str(e)}\n")
-        return False
+    return login_flow(driver, email, password)
 
 
 def validate_email(email: str):
@@ -868,10 +792,21 @@ def modal_callback():
         is_invalid_email = False
 
 
+def get_dpi_scale():
+    dpi = ctypes.windll.user32.GetDpiForSystem()
+    scale = dpi / 96  # 96 is the std DPI for 1.0 scaling
+    return scale
+
+
+def scale(value, dpi_scale):
+    return int(value * dpi_scale)
+
+
 def setup_ui():
     """Create the UI layout and widgets"""
 
     preferences = load_preferences()
+    dpi_scale = get_dpi_scale()
 
     # Set up theme, kinda obsolete now that the default dpg dark theme is in use
     # but I will keep this around as maybe I want to go back someday, or have a
@@ -883,6 +818,8 @@ def setup_ui():
             dpg.add_theme_color(dpg.mvThemeCol_TitleBg, (35, 35, 35))
             dpg.add_theme_color(dpg.mvThemeCol_TitleBgActive, (45, 45, 45))
             dpg.add_theme_color(dpg.mvThemeCol_Button, (60, 60, 60))
+            dpg.add_theme_style(dpg.mvStyleVar_FramePadding, scale(8, dpi_scale), scale(8, dpi_scale))
+            dpg.add_theme_style(dpg.mvStyleVar_ItemSpacing, scale(8, dpi_scale), scale(8, dpi_scale))
 
     # Create button styles
     with dpg.theme() as button_theme:
@@ -910,17 +847,18 @@ def setup_ui():
         modal=True,
         show=False,
         tag="modal_dialog",
-        width=400,
-        height=150,
+        width=scale(400, dpi_scale),
+        height=scale(150, dpi_scale),
     ):
         dpg.add_text("", tag="modal_title")
         dpg.add_separator()
-        dpg.add_text("", tag="modal_message", wrap=380)
+        dpg.add_text("", tag="modal_message", wrap=scale(380, dpi_scale))
         dpg.add_separator()
         dpg.add_button(
             label="OK",
-            width=75,
-            callback=modal_callback),
+            width=scale(75, dpi_scale),
+            callback=modal_callback)
+        dpg.bind_font(nerd_mono)
 
 
     # Authentication dialog
@@ -929,8 +867,8 @@ def setup_ui():
         modal=True,
         show=False,
         tag="auth_dialog",
-        width=400,
-        height=250,
+        width=scale(400, dpi_scale),
+        height=scale(250, dpi_scale),
     ):
         dpg.add_text("Please enter your Roompact credentials:")
         dpg.add_text("Email:")
@@ -938,7 +876,7 @@ def setup_ui():
         dpg.add_text("Password:")
         dpg.add_input_text(tag="password_input", width=-1, password=True)
         dpg.add_text("", tag="auth_progress")
-        dpg.add_button(label="Submit", width=100, callback=submit_credentials)
+        dpg.add_button(label="Submit", width=scale(100, dpi_scale), callback=submit_credentials)
 
     # Preferences dialog
     with dpg.window(
@@ -946,8 +884,8 @@ def setup_ui():
         modal=True,
         show=False,
         tag="preferences_dialog",
-        width=400,
-        height=150,
+        width=scale(400, dpi_scale),
+        height=scale(150, dpi_scale),
     ):
         dpg.add_checkbox(
             label="Developer Mode",
@@ -962,7 +900,7 @@ def setup_ui():
             color=(211, 65, 34),
         )
         dpg.add_separator()
-        dpg.add_button(label="Save", width=100, callback=save_preferences_callback)
+        dpg.add_button(label="Save", width=scale(100, dpi_scale), callback=save_preferences_callback)
 
     # Quit confirmation dialog
     with dpg.window(
@@ -970,16 +908,16 @@ def setup_ui():
         modal=True,
         show=False,
         tag="quit_dialog",
-        width=400,
-        height=150,
+        width=scale(400, dpi_scale),
+        height=scale(150, dpi_scale),
     ):
         dpg.add_text("Do you want to quit? All progress will be lost.")
         dpg.add_separator()
         with dpg.group(horizontal=True):
-            dpg.add_button(label="Yes", width=75, callback=confirm_quit)
+            dpg.add_button(label="Yes", width=scale(75, dpi_scale), callback=confirm_quit)
             dpg.add_button(
                 label="No",
-                width=75,
+                width=scale(75, dpi_scale),
                 callback=lambda: dpg.configure_item("quit_dialog", show=False),
             )
 
@@ -988,15 +926,15 @@ def setup_ui():
         label="Integrated Terminal",
         show=False,
         tag="terminal_window",
-        width=800,
-        height=400,
+        width=scale(800, dpi_scale),
+        height=scale(400, dpi_scale),
     ):
         with dpg.child_window(tag="terminal_text", width=-1, height=-1):
             pass
         logger.terminal_window = dpg.last_item()
 
     # Main Application Window
-    with dpg.window(tag="main_window", label="C2", width=1400, height=600):
+    with dpg.window(tag="main_window", label="C2", width=scale(1400, dpi_scale), height=scale(600, dpi_scale)):
         # Menu Bar
         with dpg.menu_bar():
             with dpg.menu(label="File"):
@@ -1007,7 +945,7 @@ def setup_ui():
         # Layout with splitting
         with dpg.group(horizontal=True):
             # Left Panel (~40% total screen sapce)
-            with dpg.child_window(width=500, height=-1, tag="left_panel"):
+            with dpg.child_window(width=scale(500, dpi_scale), height=-1, tag="left_panel"):
                 # General Information Section
                 with dpg.collapsing_header(
                     label="General Information", default_open=True
@@ -1065,7 +1003,7 @@ def setup_ui():
                     # Walk 1
                     dpg.add_text("WALK 1 *", color=(211, 65, 34))
                     dpg.add_input_text(
-                        tag="walk1_text", multiline=True, width=-1, height=100
+                        tag="walk1_text", multiline=True, width=-1, height=scale(100, dpi_scale)
                     )
 
                     with dpg.group(horizontal=True):
@@ -1074,27 +1012,27 @@ def setup_ui():
                             items=list(range(1, 13)),
                             tag="walk1_hour",
                             default_value=8,
-                            width=50,
+                            width=scale(50, dpi_scale),
                         )
                         dpg.add_text(":")
                         dpg.add_combo(
                             items=list(range(0, 60)),
                             tag="walk1_minute",
                             default_value=0,
-                            width=50,
+                            width=scale(50, dpi_scale),
                         )
                         dpg.add_combo(
                             items=["am", "pm"],
                             tag="walk1_period",
                             default_value="pm",
-                            width=50,
+                            width=scale(50, dpi_scale),
                         )
 
                     # Walk 2
                     dpg.add_separator()
                     dpg.add_text("WALK 2")
                     dpg.add_input_text(
-                        tag="walk2_text", multiline=True, width=-1, height=100
+                        tag="walk2_text", multiline=True, width=-1, height=scale(100, dpi_scale)
                     )
 
                     with dpg.group(horizontal=True):
@@ -1103,20 +1041,20 @@ def setup_ui():
                             items=list(range(1, 13)),
                             tag="walk2_hour",
                             default_value=10,
-                            width=50,
+                            width=scale(50, dpi_scale),
                         )
                         dpg.add_text(":")
                         dpg.add_combo(
                             items=list(range(0, 60)),
                             tag="walk2_minute",
                             default_value=0,
-                            width=50,
+                            width=scale(50, dpi_scale),
                         )
                         dpg.add_combo(
                             items=["am", "pm"],
                             tag="walk2_period",
                             default_value="pm",
-                            width=50,
+                            width=scale(50, dpi_scale),
                         )
 
                     # --- OBSOLETE
@@ -1133,7 +1071,7 @@ def setup_ui():
                         tag="walk3_text",
                         multiline=True,
                         width=-1,
-                        height=100,
+                        height=scale(100, dpi_scale),
                         enabled=True,
                     )
 
@@ -1143,7 +1081,7 @@ def setup_ui():
                             items=list(range(1, 13)),
                             tag="walk3_hour",
                             default_value=12,
-                            width=50,
+                            width=scale(50, dpi_scale),
                             enabled=True,
                         )
                         dpg.add_text(":")
@@ -1151,14 +1089,14 @@ def setup_ui():
                             items=list(range(0, 60)),
                             tag="walk3_minute",
                             default_value=0,
-                            width=50,
+                            width=scale(50, dpi_scale),
                             enabled=True,
                         )
                         dpg.add_combo(
                             items=["am", "pm"],
                             tag="walk3_period",
                             default_value="am",
-                            width=50,
+                            width=scale(50, dpi_scale),
                             enabled=True,
                         )
 
@@ -1172,7 +1110,7 @@ def setup_ui():
                             dpg.add_button(
                                 label=datetime.now().strftime("%Y-%m-%d"),
                                 tag="date_schedule",
-                                width=100,
+                                width=scale(100, dpi_scale),
                                 callback=lambda: dpg.configure_item(
                                     "popup_date_schedule", show=True
                                 ),
@@ -1207,65 +1145,65 @@ def setup_ui():
                             items=list(range(1, 13)),
                             tag="schedule_hour",
                             default_value=8,
-                            width=50,
+                            width=scale(50, dpi_scale),
                         )
                         dpg.add_text(":")
                         dpg.add_combo(
                             items=list(range(0, 60)),
                             tag="schedule_minute",
                             default_value=0,
-                            width=50,
+                            width=scale(50, dpi_scale),
                         )
                         dpg.add_combo(
                             items=["am", "pm"],
                             tag="schedule_period",
                             default_value="am",
-                            width=50,
+                            width=scale(50, dpi_scale),
                         )
 
                         dpg.add_button(
                             label="SCHEDULE",
                             tag="schedule_button",
                             callback=on_schedule_button,
-                            width=100,
+                            width=scale(100, dpi_scale),
                         )
 
             # Right Panel (~60% total screen space)
-            with dpg.child_window(width=800, height=-1, tag="right_panel"):
+            with dpg.child_window(width=scale(800, dpi_scale), height=-1, tag="right_panel"):
                 with dpg.collapsing_header(label="Details", default_open=True):
                     dpg.add_text("CALLS RECEIVED")
                     dpg.add_input_text(
-                        tag="calls_text", multiline=True, width=-1, height=100
+                        tag="calls_text", multiline=True, width=-1, height=scale(100, dpi_scale)
                     )
                     dpg.add_separator()
 
                     dpg.add_text("RESIDENT INTERACTIONS")
                     dpg.add_input_text(
-                        tag="interactions_text", multiline=True, width=-1, height=75
+                        tag="interactions_text", multiline=True, width=-1, height=scale(75, dpi_scale)
                     )
                     dpg.add_separator()
 
                     dpg.add_text("AREAS RESIDENTS WERE SEEN")
                     dpg.add_input_text(
-                        tag="areas_text", multiline=True, width=-1, height=75
+                        tag="areas_text", multiline=True, width=-1, height=scale(75, dpi_scale)
                     )
                     dpg.add_separator()
 
                     dpg.add_text("INCIDENTS")
                     dpg.add_input_text(
-                        tag="incidents_text", multiline=True, width=-1, height=75
+                        tag="incidents_text", multiline=True, width=-1, height=scale(75, dpi_scale)
                     )
                     dpg.add_separator()
 
                     dpg.add_text("WORK REQUESTS SUBMITTED")
                     dpg.add_input_text(
-                        tag="workrequests_text", multiline=True, width=-1, height=75
+                        tag="workrequests_text", multiline=True, width=-1, height=scale(75, dpi_scale)
                     )
                     dpg.add_separator()
 
                     dpg.add_text("ADDITIONAL NOTES")
                     dpg.add_input_text(
-                        tag="notes_text", multiline=True, width=-1, height=75
+                        tag="notes_text", multiline=True, width=-1, height=scale(75, dpi_scale)
                     )
 
     dpg.bind_theme(global_theme)
@@ -1288,18 +1226,33 @@ def setup_ui():
 
 if __name__ == "__main__":
     try:
-        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        except:
+            ctypes.windll.user32.SetProcessDPIAware()
+
+        screensize = ctypes.windll.user32.GetSystemMetrics(0), ctypes.windll.user32.GetSystemMetrics(1)
+
+        w = int(screensize[0] / 1.2)
+        h = int(screensize[1] / 1.35)
 
         dpg.create_context()
-        setup_ui()
-
+        
         script_dir = os.path.dirname(os.path.abspath(__file__))
         small_icon_path = os.path.join(script_dir, 'assets', '64.ico')
         large_icon_path = os.path.join(script_dir, 'assets', '256.ico')
+        font_path = os.path.join(script_dir, 'assets', 'ZedMonoNerdFont-Light.ttf')
 
+        dpi_scale = get_dpi_scale()
+        with dpg.font_registry():
+            nerd_mono = dpg.add_font(font_path, 25 * dpi_scale)
 
-        dpg.create_viewport(title="C2", width=1600, height=800, small_icon=small_icon_path, large_icon=large_icon_path)
-        dpg.configure_viewport(0, dpi_aware=True)
+        dpg.set_global_font_scale(1.0 / dpi_scale)
+
+        setup_ui()
+
+        dpg.create_viewport(title="C2", width=w, height=h, small_icon=small_icon_path, large_icon=large_icon_path)
+        #dpg.configure_viewport(0, dpi_aware=True)
 
         # --- Theming
         dark_theme = create_theme_imgui_dark()
