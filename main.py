@@ -639,7 +639,7 @@ def submit_credentials():
             credentials[0] = email
             credentials[1] = password
             dpg.configure_item("auth_dialog", show=False)
-            time.sleep(0.1)
+            time.sleep(0.5)
 
             is_auth_complete = True
             complete_scheduling()
