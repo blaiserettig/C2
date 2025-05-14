@@ -1248,8 +1248,9 @@ if __name__ == "__main__":
         font_path = os.path.join(script_dir, 'assets', 'ZedMonoNerdFont-Light.ttf')
 
         dpi_scale = get_dpi_scale()
+        font_scale = int(w / 106)
         with dpg.font_registry():
-            nerd_mono = dpg.add_font(font_path, 18 * dpi_scale)
+            nerd_mono = dpg.add_font(font_path, font_scale * dpi_scale)
 
         dpg.set_global_font_scale(1.0 / dpi_scale)
 
