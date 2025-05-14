@@ -1228,6 +1228,15 @@ def setup_ui():
     dev_mode_warn()
 
 
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    if getattr(sys, 'frozen', False): 
+        base_path = sys._MEIPASS
+    else:
+        base_path = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base_path, relative_path)
+
+
 if __name__ == "__main__":
     try:
         try:
@@ -1243,9 +1252,9 @@ if __name__ == "__main__":
         dpg.create_context()
         
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        small_icon_path = os.path.join(script_dir, 'assets', '64.ico')
-        large_icon_path = os.path.join(script_dir, 'assets', '256.ico')
-        font_path = os.path.join(script_dir, 'assets', 'ZedMonoNerdFont-Light.ttf')
+        small_icon_path = resource_path(os.path.join('assets', '64.ico'))
+        large_icon_path = resource_path(os.path.join('assets', '256.ico'))
+        font_path = resource_path(os.path.join('assets', 'ZedMonoNerdFont-Light.ttf'))
 
         dpi_scale = get_dpi_scale()
         font_scale = int(w / 106)
