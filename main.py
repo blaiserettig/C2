@@ -121,6 +121,19 @@ def save_preferences(preferences):
         print(f"Error saving preferences: {e}")
 
 
+def save_cred_to_keyring(email: str, password: str):
+    keyring.set_password("roompact", "email", email)
+    keyring.set_password("roompact", "password", password)
+
+
+def load_email_from_keyring() -> str:
+    return keyring.get_password("roompact", "email").strip()
+
+
+def load_password_from_keyring() -> str:
+    return keyring.get_password("roompact", "password").strip()
+
+
 def format_time(time_tuple: Tuple[int, int, str]) -> str:
     """Format a time tuple (hour, minute, am/pm) into a string"""
     hour, minute, period = time_tuple
@@ -233,7 +246,7 @@ def throw_modal_error(err: TimeoutException, driver):
     return False
 
 
-def login_flow(driver, email, password):
+def login_flow(driver):
 
 
     try:  # Wait until we arrive at the Roompact login page
@@ -245,7 +258,7 @@ def login_flow(driver, email, password):
 
     # Continue with login process
     rp_input_email = driver.find_element(By.ID, "login-input")
-    rp_input_email.send_keys(email)
+    rp_input_email.send_keys(load_email_from_keyring())
     rp_input_email.send_keys(Keys.RETURN)
 
     try:  # See if we are at the Microsoft SSO page
@@ -259,7 +272,7 @@ def login_flow(driver, email, password):
             )
 
             rp_input_password = driver.find_element(By.ID, "password-input")
-            rp_input_password.send_keys(password)
+            rp_input_password.send_keys(load_password_from_keyring())
             rp_input_password.send_keys(Keys.RETURN)
 
             try:  # If that succeeds, wait once again to be redirected to Microsoft SSO
@@ -272,7 +285,7 @@ def login_flow(driver, email, password):
             throw_modal_error(err, driver)
 
     msft_input_email = driver.find_element(By.ID, "i0116")
-    msft_input_email.send_keys(email)
+    msft_input_email.send_keys(load_email_from_keyring())
     msft_input_email.send_keys(Keys.RETURN)
 
     time.sleep(1)
@@ -285,7 +298,7 @@ def login_flow(driver, email, password):
         throw_modal_error(err, driver)
 
     msft_input_password = driver.find_element(By.ID, "i0118")
-    msft_input_password.send_keys(password)
+    msft_input_password.send_keys(load_password_from_keyring())
     msft_input_password.send_keys(Keys.RETURN)
 
     try:
@@ -322,14 +335,11 @@ def execute(cred: list):
         dpg.configure_item("modal_dialog", show=True)
         return
 
-    email = str(cred[0]).strip()
-    password = str(cred[1]).strip()
-
     driver = get_chromedriver()
 
     driver.get("https://roompact.com/login")
 
-    if (not login_flow(driver, email, password)):
+    if (not login_flow(driver)):
         return
 
     driver.get("https://roompact.com/forms/#/form/7r3gX9")
@@ -470,11 +480,6 @@ def execute(cred: list):
     driver.quit()
     on_cancel_or_execute("execute")
 
-    email = None
-    password = None
-    del email
-    del password
-
     return
 
 
@@ -487,7 +492,7 @@ def auth():
     dpg.configure_item("auth_progress", default_value="")
 
 
-def attempt_login(email, password):
+def attempt_login():
     global is_auth_complete
     """Try to log in with the given credentials"""
     if not selenium_available:
@@ -501,12 +506,12 @@ def attempt_login(email, password):
 
     driver.get("https://roompact.com/login")
 
-    return login_flow(driver, email, password)
+    return login_flow(driver)
 
 
-def validate_email(email: str):
+def validate_email():
     """Validate email format"""
-    return len(email) >= 13 and email.endswith("@chapman.edu")
+    return len(load_email_from_keyring()) >= 13 and load_email_from_keyring().endswith("@chapman.edu")
 
 
 def show_progress():
@@ -533,11 +538,11 @@ def submit_credentials():
     global credentials, is_auth_complete, progress_index, logger, is_invalid_email
 
     is_auth_complete = False
-    email = dpg.get_value("email_input").strip()
-    password = dpg.get_value("password_input").strip()
+
+    save_cred_to_keyring(dpg.get_value("email_input").strip(), dpg.get_value("password_input").strip())
 
     # Validate email format
-    if not validate_email(email):
+    if not validate_email():
 
         is_invalid_email = True
         dpg.configure_item("auth_dialog", show=False)
@@ -552,7 +557,7 @@ def submit_credentials():
         return
 
     # Check for empty password
-    if not password:
+    if not load_password_from_keyring():
         dpg.configure_item("modal_title", default_value="Empty Password")
         dpg.configure_item("modal_message", default_value="Password cannot be empty.")
         dpg.configure_item("modal_dialog", show=True)
@@ -566,9 +571,7 @@ def submit_credentials():
     def login_task():
         global is_auth_complete, credentials, has_auth_failed
 
-        if attempt_login(email, password):  # authenticated, credentials are valid
-            credentials[0] = email
-            credentials[1] = password
+        if attempt_login():  # authenticated, credentials are valid
             dpg.configure_item("auth_dialog", show=False)
             time.sleep(0.5)
 
@@ -790,6 +793,7 @@ def modal_callback():
         time.sleep(0.5)
         dpg.configure_item("auth_dialog", show=True)
         is_invalid_email = False
+        has_auth_failed = False
 
 
 def get_dpi_scale():
@@ -1245,7 +1249,7 @@ if __name__ == "__main__":
 
         dpi_scale = get_dpi_scale()
         with dpg.font_registry():
-            nerd_mono = dpg.add_font(font_path, 25 * dpi_scale)
+            nerd_mono = dpg.add_font(font_path, 18 * dpi_scale)
 
         dpg.set_global_font_scale(1.0 / dpi_scale)
 
