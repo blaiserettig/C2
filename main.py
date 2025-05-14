@@ -1,3 +1,5 @@
+#pyinstaller --noconsole --add-data "D:\C2\assets\64.ico;assets" --add-data "D:\C2\assets\256.ico;assets" --add-data "D:\C2\assets\ZedMonoNerdFont-Light.ttf;assets" --add-data "C:\Users\Blais\.wdm;wdm" --collect-all selenium --icon="D:\C2\assets\64.ico" main.py
+
 import dearpygui.dearpygui as dpg
 from dearpygui_ext.themes import create_theme_imgui_dark
 from datetime import datetime
